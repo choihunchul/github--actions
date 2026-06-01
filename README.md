@@ -43,7 +43,7 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Publish to Open VSX & VS Code Marketplace
         uses: choihunchul/github--actions/publish-vscode-extension@main
