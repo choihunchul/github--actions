@@ -72,6 +72,8 @@ jobs:
       OVSX_PAT: ${{ secrets.OVSX_PAT }}
 ```
 
+Reusable workflow 내부 composite action은 `choihunchul/github--actions/publish-vscode-extension@main`처럼 **절대 경로**를 씁니다. `./publish-vscode-extension`은 호출자 repo 기준으로 해석되어 실패합니다.
+
 더 많은 예시는 [`examples/publish-on-release.yml`](examples/publish-on-release.yml)을 참고하세요.
 
 ## Inputs

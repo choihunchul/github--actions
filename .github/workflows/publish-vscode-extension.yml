@@ -90,7 +90,7 @@ jobs:
 
       - name: Publish extension
         id: publish
-        uses: ./publish-vscode-extension
+        uses: choihunchul/github--actions/publish-vscode-extension@main
         with:
           vsce-pat: ${{ secrets.VSCE_PAT }}
           ovsx-pat: ${{ secrets.OVSX_PAT }}
