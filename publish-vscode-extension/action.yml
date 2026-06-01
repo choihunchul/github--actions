@@ -1,0 +1,190 @@
+name: Publish VS Code Extension
+description: Package and publish a VS Code extension to Open VSX and VS Code Marketplace
+
+inputs:
+  vsce-pat:
+    description: Personal Access Token for VS Code Marketplace (Azure DevOps PAT)
+    required: false
+  ovsx-pat:
+    description: Personal Access Token for Open VSX Registry
+    required: false
+  working-directory:
+    description: Directory containing the extension package.json
+    required: false
+    default: "."
+  node-version:
+    description: Node.js version
+    required: false
+    default: "20"
+  package-manager:
+    description: Package manager to install dependencies (npm, yarn, pnpm)
+    required: false
+    default: npm
+  install-command:
+    description: Custom install command (overrides package-manager)
+    required: false
+    default: ""
+  build-command:
+    description: Command to run before packaging (e.g. npm run compile)
+    required: false
+    default: ""
+  publish-vscode:
+    description: Publish to VS Code Marketplace
+    required: false
+    default: "true"
+  publish-openvsx:
+    description: Publish to Open VSX Registry
+    required: false
+    default: "true"
+  vsce-version:
+    description: Version of @vscode/vsce to use
+    required: false
+    default: latest
+  ovsx-version:
+    description: Version of ovsx to use
+    required: false
+    default: latest
+  vsce-package-args:
+    description: Additional arguments passed to vsce package
+    required: false
+    default: ""
+  vsce-publish-args:
+    description: Additional arguments passed to vsce publish
+    required: false
+    default: ""
+  ovsx-args:
+    description: Additional arguments passed to ovsx publish
+    required: false
+    default: ""
+  no-verify:
+    description: Skip extension validation (for enableProposedApi extensions)
+    required: false
+    default: "false"
+  pre-release:
+    description: Publish as pre-release version
+    required: false
+    default: "false"
+
+outputs:
+  vsix-path:
+    description: Path to the packaged .vsix file
+    value: ${{ steps.package.outputs.vsix-path }}
+  vsix-name:
+    description: Filename of the packaged .vsix file
+    value: ${{ steps.package.outputs.vsix-name }}
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Setup pnpm
+      if: inputs.package-manager == 'pnpm' && inputs.install-command == ''
+      uses: pnpm/action-setup@v4
+      with:
+        version: 9
+
+    - name: Install dependencies
+      if: inputs.install-command != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: ${{ inputs.install-command }}
+
+    - name: Install dependencies (npm)
+      if: inputs.install-command == '' && inputs.package-manager == 'npm'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: npm ci
+
+    - name: Install dependencies (yarn)
+      if: inputs.install-command == '' && inputs.package-manager == 'yarn'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: yarn install --frozen-lockfile
+
+    - name: Install dependencies (pnpm)
+      if: inputs.install-command == '' && inputs.package-manager == 'pnpm'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: pnpm install --frozen-lockfile
+
+    - name: Build extension
+      if: inputs.build-command != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: ${{ inputs.build-command }}
+
+    - name: Package extension
+      id: package
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        VSCE_PACKAGE_ARGS: ${{ inputs.vsce-package-args }}
+      run: |
+        set -euo pipefail
+
+        PACKAGE_ARGS=(package --out extension.vsix)
+        if [[ -n "$VSCE_PACKAGE_ARGS" ]]; then
+          # shellcheck disable=SC2206
+          PACKAGE_ARGS+=($VSCE_PACKAGE_ARGS)
+        fi
+        npx --yes "@vscode/vsce@${{ inputs.vsce-version }}" "${PACKAGE_ARGS[@]}"
+
+        if [[ ! -f extension.vsix ]]; then
+          echo "Failed to create extension.vsix" >&2
+          exit 1
+        fi
+
+        echo "vsix-path=${{ inputs.working-directory }}/extension.vsix" >> "$GITHUB_OUTPUT"
+        echo "vsix-name=extension.vsix" >> "$GITHUB_OUTPUT"
+
+    - name: Publish to Open VSX Registry
+      if: inputs.publish-openvsx == 'true' && inputs.ovsx-pat != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        OVSX_PAT: ${{ inputs.ovsx-pat }}
+        OVSX_ARGS: ${{ inputs.ovsx-args }}
+        PRE_RELEASE: ${{ inputs.pre-release }}
+      run: |
+        set -euo pipefail
+
+        PUBLISH_ARGS=(publish extension.vsix --pat "$OVSX_PAT")
+        if [[ -n "$OVSX_ARGS" ]]; then
+          # shellcheck disable=SC2206
+          PUBLISH_ARGS+=($OVSX_ARGS)
+        fi
+        if [[ "$PRE_RELEASE" == "true" ]]; then
+          PUBLISH_ARGS+=(--pre-release)
+        fi
+
+        npx --yes "ovsx@${{ inputs.ovsx-version }}" "${PUBLISH_ARGS[@]}"
+
+    - name: Publish to VS Code Marketplace
+      if: inputs.publish-vscode == 'true' && inputs.vsce-pat != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        VSCE_PAT: ${{ inputs.vsce-pat }}
+        VSCE_PUBLISH_ARGS: ${{ inputs.vsce-publish-args }}
+        NO_VERIFY: ${{ inputs.no-verify }}
+        PRE_RELEASE: ${{ inputs.pre-release }}
+      run: |
+        set -euo pipefail
+
+        PUBLISH_ARGS=(publish extension.vsix)
+        if [[ -n "$VSCE_PUBLISH_ARGS" ]]; then
+          # shellcheck disable=SC2206
+          PUBLISH_ARGS+=($VSCE_PUBLISH_ARGS)
+        fi
+        if [[ "$NO_VERIFY" == "true" ]]; then
+          PUBLISH_ARGS+=(--no-verify)
+        fi
+        if [[ "$PRE_RELEASE" == "true" ]]; then
+          PUBLISH_ARGS+=(--pre-release)
+        fi
+
+        npx --yes "@vscode/vsce@${{ inputs.vsce-version }}" "${PUBLISH_ARGS[@]}"

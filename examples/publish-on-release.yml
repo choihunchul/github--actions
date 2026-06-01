@@ -1,0 +1,22 @@
+# VS Code 확장 저장소에 복사해 사용하는 예시 워크플로우
+#
+# 필요한 secrets:
+#   VSCE_PAT  - VS Code Marketplace PAT (Azure DevOps)
+#   OVSX_PAT  - Open VSX Registry PAT (https://open-vsx.org/user-settings/tokens)
+
+name: Release Extension
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    uses: choihunchul/github--actions/.github/workflows/publish-vscode-extension.yml@main
+    with:
+      build-command: npm run compile
+      # pre-release: true
+    secrets:
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      OVSX_PAT: ${{ secrets.OVSX_PAT }}

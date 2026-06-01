@@ -1,0 +1,108 @@
+name: Publish VS Code Extension
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory containing the extension package.json
+        required: false
+        type: string
+        default: "."
+      node-version:
+        description: Node.js version
+        required: false
+        type: string
+        default: "20"
+      package-manager:
+        description: Package manager (npm, yarn, pnpm)
+        required: false
+        type: string
+        default: npm
+      install-command:
+        description: Custom install command (overrides package-manager)
+        required: false
+        type: string
+        default: ""
+      build-command:
+        description: Command to run before packaging
+        required: false
+        type: string
+        default: ""
+      publish-vscode:
+        description: Publish to VS Code Marketplace
+        required: false
+        type: boolean
+        default: true
+      publish-openvsx:
+        description: Publish to Open VSX Registry
+        required: false
+        type: boolean
+        default: true
+      vsce-package-args:
+        description: Additional arguments for vsce package
+        required: false
+        type: string
+        default: ""
+      vsce-publish-args:
+        description: Additional arguments for vsce publish
+        required: false
+        type: string
+        default: ""
+      ovsx-args:
+        description: Additional arguments for ovsx
+        required: false
+        type: string
+        default: ""
+      no-verify:
+        description: Skip extension validation
+        required: false
+        type: boolean
+        default: false
+      pre-release:
+        description: Publish as pre-release version
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      VSCE_PAT:
+        description: Personal Access Token for VS Code Marketplace
+        required: false
+      OVSX_PAT:
+        description: Personal Access Token for Open VSX Registry
+        required: false
+    outputs:
+      vsix-path:
+        description: Path to the packaged .vsix file
+        value: ${{ jobs.publish.outputs.vsix-path }}
+      vsix-name:
+        description: Filename of the packaged .vsix file
+        value: ${{ jobs.publish.outputs.vsix-name }}
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    outputs:
+      vsix-path: ${{ steps.publish.outputs.vsix-path }}
+      vsix-name: ${{ steps.publish.outputs.vsix-name }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Publish extension
+        id: publish
+        uses: ./publish-vscode-extension
+        with:
+          vsce-pat: ${{ secrets.VSCE_PAT }}
+          ovsx-pat: ${{ secrets.OVSX_PAT }}
+          working-directory: ${{ inputs.working-directory }}
+          node-version: ${{ inputs.node-version }}
+          package-manager: ${{ inputs.package-manager }}
+          install-command: ${{ inputs.install-command }}
+          build-command: ${{ inputs.build-command }}
+          publish-vscode: ${{ inputs.publish-vscode }}
+          publish-openvsx: ${{ inputs.publish-openvsx }}
+          vsce-package-args: ${{ inputs.vsce-package-args }}
+          vsce-publish-args: ${{ inputs.vsce-publish-args }}
+          ovsx-args: ${{ inputs.ovsx-args }}
+          no-verify: ${{ inputs.no-verify }}
+          pre-release: ${{ inputs.pre-release }}
