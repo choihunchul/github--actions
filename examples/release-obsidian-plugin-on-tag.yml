@@ -1,0 +1,27 @@
+# Obsidian 플러그인 저장소에 복사해 사용하는 예시 워크플로우
+#
+# 태그를 push하면 빌드 후 GitHub Release(draft)에
+# main.js, manifest.json, styles.css를 업로드합니다.
+#
+# Settings → Actions → General → Workflow permissions:
+#   "Read and write permissions" 필요
+
+name: Release Obsidian plugin
+
+on:
+  push:
+    tags:
+      - "*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    uses: choihunchul/github--actions/.github/workflows/release-obsidian-plugin.yml@main
+    with:
+      build-command: npm run build
+      # tag-prefix: v
+      # draft: false
+      # include-zip: true

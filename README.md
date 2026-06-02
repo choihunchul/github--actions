@@ -7,6 +7,117 @@
 | Action | 경로 | 설명 |
 | --- | --- | --- |
 | Publish VS Code Extension | [`publish-vscode-extension/`](publish-vscode-extension/) | Open VSX + VS Code Marketplace 배포 |
+| Release Obsidian Plugin | [`release-obsidian-plugin/`](release-obsidian-plugin/) | Obsidian 플러그인 GitHub Release 배포 |
+
+---
+
+# Release Obsidian Plugin
+
+Obsidian 플러그인을 빌드한 뒤 **GitHub Releases**에 `main.js`, `manifest.json`, `styles.css`를 업로드하는 공통 GitHub Action입니다. [Obsidian 공식 가이드](https://docs.obsidian.md/Plugins/Releasing/Release+your+plugin+with+GitHub+Actions) 흐름을 따릅니다.
+
+## 사전 준비
+
+- repo **Settings → Actions → General → Workflow permissions**에서 **Read and write permissions** 활성화
+- `manifest.json`의 `version`과 Git tag 이름이 일치해야 합니다 (예: tag `1.0.0`)
+- Community plugin 등록은 별도로 [obsidian-releases](https://github.com/obsidianmd/obsidian-releases) PR이 필요합니다
+
+## 사용 방법
+
+### 1. Composite Action (권장)
+
+```yaml
+name: Release Obsidian plugin
+
+on:
+  push:
+    tags:
+      - "*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Release plugin
+        uses: choihunchul/github--actions/release-obsidian-plugin@main
+        with:
+          build-command: npm run build
+```
+
+### 2. Reusable Workflow
+
+```yaml
+name: Release Obsidian plugin
+
+on:
+  push:
+    tags:
+      - "*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    uses: choihunchul/github--actions/.github/workflows/release-obsidian-plugin.yml@main
+    with:
+      build-command: npm run build
+```
+
+더 많은 예시는 [`examples/release-obsidian-plugin-on-tag.yml`](examples/release-obsidian-plugin-on-tag.yml)을 참고하세요.
+
+## Inputs
+
+| Input | Required | Default | Description |
+| --- | --- | --- | --- |
+| `github-token` | No | `github.token` | Release 생성용 토큰 |
+| `working-directory` | No | `.` | 플러그인 루트 디렉터리 |
+| `node-version` | No | `20` | Node.js 버전 |
+| `package-manager` | No | `npm` | `npm`, `yarn`, `pnpm` |
+| `install-command` | No | - | 커스텀 설치 명령 |
+| `build-command` | No | `npm run build` | 빌드 명령 |
+| `verify-tag` | No | `true` | tag ↔ manifest version 검증 |
+| `tag-prefix` | No | - | tag 비교 전 제거할 접두사 (예: `v`) |
+| `main-path` | No | `main.js` | 빌드 결과 main 스크립트 |
+| `manifest-path` | No | `manifest.json` | manifest 경로 |
+| `styles-path` | No | `styles.css` | styles 경로 |
+| `include-styles` | No | `auto` | `auto` / `true` / `false` |
+| `include-zip` | No | `false` | zip 아카이브 추가 |
+| `draft` | No | `true` | draft release 생성 |
+| `prerelease` | No | `false` | pre-release 표시 |
+| `generate-release-notes` | No | `false` | release notes 자동 생성 |
+| `release-title` | No | tag 이름 | release 제목 |
+| `extra-assets` | No | - | 추가 asset 경로 (공백 구분) |
+
+## Outputs
+
+| Output | Description |
+| --- | --- |
+| `tag` | Git tag 이름 |
+| `version` | `manifest.json` version |
+| `release-url` | 생성된 GitHub Release URL |
+
+## 동작 방식
+
+1. 의존성 설치
+2. `build-command` 실행 (기본 `npm run build`)
+3. `main.js`, `manifest.json` 존재 확인
+4. tag ↔ manifest version 검증
+5. `styles.css`가 있으면 포함 (`include-styles: auto`)
+6. `gh release create`로 GitHub Release 생성 (기본 draft)
+
+## 태그로 릴리즈
+
+```bash
+git tag -a 1.0.0 -m "1.0.0"
+git push origin 1.0.0
+```
+
+`v` prefix tag를 쓰면 `tag-prefix: v`를 설정하세요.
 
 ---
 

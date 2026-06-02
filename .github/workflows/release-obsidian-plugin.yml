@@ -1,0 +1,136 @@
+name: Release Obsidian Plugin
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory containing manifest.json and package.json
+        required: false
+        type: string
+        default: "."
+      node-version:
+        description: Node.js version
+        required: false
+        type: string
+        default: "20"
+      package-manager:
+        description: Package manager (npm, yarn, pnpm)
+        required: false
+        type: string
+        default: npm
+      install-command:
+        description: Custom install command (overrides package-manager)
+        required: false
+        type: string
+        default: ""
+      build-command:
+        description: Command to build the plugin
+        required: false
+        type: string
+        default: npm run build
+      verify-tag:
+        description: Verify git tag matches manifest.json version
+        required: false
+        type: boolean
+        default: true
+      tag-prefix:
+        description: Prefix stripped from git tag before version compare
+        required: false
+        type: string
+        default: ""
+      main-path:
+        description: Path to the compiled main script
+        required: false
+        type: string
+        default: main.js
+      manifest-path:
+        description: Path to manifest.json
+        required: false
+        type: string
+        default: manifest.json
+      styles-path:
+        description: Path to styles.css
+        required: false
+        type: string
+        default: styles.css
+      include-styles:
+        description: Include styles.css in release (auto, true, false)
+        required: false
+        type: string
+        default: auto
+      include-zip:
+        description: Attach a zip archive of plugin files
+        required: false
+        type: boolean
+        default: false
+      draft:
+        description: Create release as draft
+        required: false
+        type: boolean
+        default: true
+      prerelease:
+        description: Mark release as pre-release
+        required: false
+        type: boolean
+        default: false
+      generate-release-notes:
+        description: Auto-generate release notes
+        required: false
+        type: boolean
+        default: false
+      release-title:
+        description: Release title (defaults to tag name)
+        required: false
+        type: string
+        default: ""
+      extra-assets:
+        description: Additional release asset paths (space-separated)
+        required: false
+        type: string
+        default: ""
+    outputs:
+      tag:
+        description: Git tag name
+        value: ${{ jobs.release.outputs.tag }}
+      version:
+        description: Plugin version from manifest.json
+        value: ${{ jobs.release.outputs.version }}
+      release-url:
+        description: URL of the GitHub release
+        value: ${{ jobs.release.outputs.release-url }}
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      version: ${{ steps.release.outputs.version }}
+      release-url: ${{ steps.release.outputs.release-url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Release plugin
+        id: release
+        uses: choihunchul/github--actions/release-obsidian-plugin@main
+        with:
+          working-directory: ${{ inputs.working-directory }}
+          node-version: ${{ inputs.node-version }}
+          package-manager: ${{ inputs.package-manager }}
+          install-command: ${{ inputs.install-command }}
+          build-command: ${{ inputs.build-command }}
+          verify-tag: ${{ inputs.verify-tag }}
+          tag-prefix: ${{ inputs.tag-prefix }}
+          main-path: ${{ inputs.main-path }}
+          manifest-path: ${{ inputs.manifest-path }}
+          styles-path: ${{ inputs.styles-path }}
+          include-styles: ${{ inputs.include-styles }}
+          include-zip: ${{ inputs.include-zip }}
+          draft: ${{ inputs.draft }}
+          prerelease: ${{ inputs.prerelease }}
+          generate-release-notes: ${{ inputs.generate-release-notes }}
+          release-title: ${{ inputs.release-title }}
+          extra-assets: ${{ inputs.extra-assets }}

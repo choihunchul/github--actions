@@ -1,0 +1,262 @@
+name: Release Obsidian Plugin
+description: Build an Obsidian plugin and publish assets to GitHub Releases
+
+inputs:
+  github-token:
+    description: GitHub token for creating releases (defaults to github.token)
+    required: false
+    default: ""
+  working-directory:
+    description: Directory containing manifest.json and package.json
+    required: false
+    default: "."
+  node-version:
+    description: Node.js version
+    required: false
+    default: "20"
+  package-manager:
+    description: Package manager to install dependencies (npm, yarn, pnpm)
+    required: false
+    default: npm
+  install-command:
+    description: Custom install command (overrides package-manager)
+    required: false
+    default: ""
+  build-command:
+    description: Command to build the plugin
+    required: false
+    default: npm run build
+  verify-tag:
+    description: Verify git tag matches manifest.json version
+    required: false
+    default: "true"
+  tag-prefix:
+    description: Prefix stripped from git tag before version compare (e.g. v)
+    required: false
+    default: ""
+  main-path:
+    description: Path to the compiled main script
+    required: false
+    default: main.js
+  manifest-path:
+    description: Path to manifest.json
+    required: false
+    default: manifest.json
+  styles-path:
+    description: Path to styles.css
+    required: false
+    default: styles.css
+  include-styles:
+    description: Include styles.css in release (auto, true, false)
+    required: false
+    default: auto
+  include-zip:
+    description: Attach a zip archive of plugin files
+    required: false
+    default: "false"
+  draft:
+    description: Create release as draft
+    required: false
+    default: "true"
+  prerelease:
+    description: Mark release as pre-release
+    required: false
+    default: "false"
+  generate-release-notes:
+    description: Auto-generate release notes
+    required: false
+    default: "false"
+  release-title:
+    description: Release title (defaults to tag name)
+    required: false
+    default: ""
+  extra-assets:
+    description: Additional release asset paths (space-separated)
+    required: false
+    default: ""
+
+outputs:
+  tag:
+    description: Git tag name
+    value: ${{ steps.release.outputs.tag }}
+  version:
+    description: Plugin version from manifest.json
+    value: ${{ steps.release.outputs.version }}
+  release-url:
+    description: URL of the GitHub release
+    value: ${{ steps.release.outputs.release-url }}
+
+runs:
+  using: composite
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@v5
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Setup pnpm
+      if: inputs.package-manager == 'pnpm' && inputs.install-command == ''
+      uses: pnpm/action-setup@v4
+      with:
+        version: 9
+
+    - name: Install dependencies
+      if: inputs.install-command != ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: ${{ inputs.install-command }}
+
+    - name: Install dependencies (npm)
+      if: inputs.install-command == '' && inputs.package-manager == 'npm'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: npm ci
+
+    - name: Install dependencies (yarn)
+      if: inputs.install-command == '' && inputs.package-manager == 'yarn'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: yarn install --frozen-lockfile
+
+    - name: Install dependencies (pnpm)
+      if: inputs.install-command == '' && inputs.package-manager == 'pnpm'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: pnpm install --frozen-lockfile
+
+    - name: Build plugin
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: ${{ inputs.build-command }}
+
+    - name: Create GitHub release
+      id: release
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        GH_TOKEN: ${{ inputs.github-token != '' && inputs.github-token || github.token }}
+        VERIFY_TAG: ${{ inputs.verify-tag }}
+        TAG_PREFIX: ${{ inputs.tag-prefix }}
+        MAIN_PATH: ${{ inputs.main-path }}
+        MANIFEST_PATH: ${{ inputs.manifest-path }}
+        STYLES_PATH: ${{ inputs.styles-path }}
+        INCLUDE_STYLES: ${{ inputs.include-styles }}
+        INCLUDE_ZIP: ${{ inputs.include-zip }}
+        DRAFT: ${{ inputs.draft }}
+        PRERELEASE: ${{ inputs.prerelease }}
+        GENERATE_NOTES: ${{ inputs.generate-release-notes }}
+        RELEASE_TITLE: ${{ inputs.release-title }}
+        EXTRA_ASSETS: ${{ inputs.extra-assets }}
+      run: |
+        set -euo pipefail
+
+        if [[ ! -f "$MANIFEST_PATH" ]]; then
+          echo "Missing manifest: $MANIFEST_PATH" >&2
+          exit 1
+        fi
+
+        if [[ ! -f "$MAIN_PATH" ]]; then
+          echo "Missing main script: $MAIN_PATH" >&2
+          exit 1
+        fi
+
+        VERSION=$(node -p "require('./${MANIFEST_PATH}').version")
+        PLUGIN_ID=$(node -p "require('./${MANIFEST_PATH}').id")
+
+        if [[ "$GITHUB_REF" != refs/tags/* ]]; then
+          echo "Release requires a tag push (got: $GITHUB_REF)" >&2
+          exit 1
+        fi
+
+        RAW_TAG="${GITHUB_REF#refs/tags/}"
+        TAG_VERSION="$RAW_TAG"
+        if [[ -n "$TAG_PREFIX" && "$TAG_VERSION" == "$TAG_PREFIX"* ]]; then
+          TAG_VERSION="${TAG_VERSION#"$TAG_PREFIX"}"
+        fi
+
+        if [[ "$VERIFY_TAG" == "true" && "$TAG_VERSION" != "$VERSION" ]]; then
+          echo "Tag ($RAW_TAG) does not match manifest version ($VERSION)" >&2
+          exit 1
+        fi
+
+        INCLUDE_STYLES_FILE=false
+        case "$INCLUDE_STYLES" in
+          true)
+            if [[ ! -f "$STYLES_PATH" ]]; then
+              echo "styles.css required but missing: $STYLES_PATH" >&2
+              exit 1
+            fi
+            INCLUDE_STYLES_FILE=true
+            ;;
+          auto)
+            if [[ -f "$STYLES_PATH" ]]; then
+              INCLUDE_STYLES_FILE=true
+            fi
+            ;;
+          false)
+            INCLUDE_STYLES_FILE=false
+            ;;
+          *)
+            echo "Invalid include-styles value: $INCLUDE_STYLES" >&2
+            exit 1
+            ;;
+        esac
+
+        ASSETS=("$MAIN_PATH" "$MANIFEST_PATH")
+        if [[ "$INCLUDE_STYLES_FILE" == "true" ]]; then
+          ASSETS+=("$STYLES_PATH")
+        fi
+
+        if [[ "$INCLUDE_ZIP" == "true" ]]; then
+          ZIP_NAME="${PLUGIN_ID}-${VERSION}.zip"
+          rm -rf release-staging "$ZIP_NAME"
+          mkdir -p "release-staging/${PLUGIN_ID}"
+          cp "$MAIN_PATH" "$MANIFEST_PATH" "release-staging/${PLUGIN_ID}/"
+          if [[ "$INCLUDE_STYLES_FILE" == "true" ]]; then
+            cp "$STYLES_PATH" "release-staging/${PLUGIN_ID}/"
+          fi
+          (
+            cd release-staging
+            zip -r "../${ZIP_NAME}" "$PLUGIN_ID"
+          )
+          rm -rf release-staging
+          ASSETS+=("$ZIP_NAME")
+        fi
+
+        if [[ -n "$EXTRA_ASSETS" ]]; then
+          # shellcheck disable=SC2206
+          EXTRA=($EXTRA_ASSETS)
+          for asset in "${EXTRA[@]}"; do
+            if [[ ! -f "$asset" ]]; then
+              echo "Missing extra asset: $asset" >&2
+              exit 1
+            fi
+            ASSETS+=("$asset")
+          done
+        fi
+
+        CREATE_ARGS=()
+        TITLE="${RELEASE_TITLE:-$RAW_TAG}"
+        CREATE_ARGS+=(--title="$TITLE")
+
+        if [[ "$DRAFT" == "true" ]]; then
+          CREATE_ARGS+=(--draft)
+        fi
+        if [[ "$PRERELEASE" == "true" ]]; then
+          CREATE_ARGS+=(--prerelease)
+        fi
+        if [[ "$GENERATE_NOTES" == "true" ]]; then
+          CREATE_ARGS+=(--generate-notes)
+        fi
+
+        if gh release view "$RAW_TAG" >/dev/null 2>&1; then
+          gh release upload "$RAW_TAG" "${ASSETS[@]}" --clobber
+        else
+          gh release create "$RAW_TAG" "${CREATE_ARGS[@]}" "${ASSETS[@]}"
+        fi
+
+        RELEASE_URL=$(gh release view "$RAW_TAG" --json url --jq .url)
+
+        echo "tag=$RAW_TAG" >> "$GITHUB_OUTPUT"
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+        echo "release-url=$RELEASE_URL" >> "$GITHUB_OUTPUT"
