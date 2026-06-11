@@ -12,6 +12,7 @@
 | Publish Homebrew Formula | [`publish-homebrew-formula/`](publish-homebrew-formula/) | multi-platform Formula 생성·배포 |
 | Publish Homebrew Cask | [`publish-homebrew-cask/`](publish-homebrew-cask/) | macOS Cask 생성·배포 |
 | Publish APT Repository | [`publish-apt-repo/`](publish-apt-repo/) | GitHub Release `.deb` → APT repo 게시 |
+| Publish WinGet Package | [`publish-winget/`](publish-winget/) | GitHub Release Windows asset → winget-pkgs PR |
 
 ## Cursor Skill
 
@@ -23,7 +24,7 @@
 | SKILL.md | 액션 선택, reusable workflow wrapper, secrets, pitfalls |
 | reference.md | 액션별 inputs, triggers, troubleshooting |
 
-트리거 예: `github--actions`, `publish-apt-repo`, `HOMEBREW_TAP_TOKEN`, `APT_REPO_TOKEN`, Homebrew tap / APT repo workflow 추가.
+트리거 예: `github--actions`, `publish-apt-repo`, `publish-winget`, `HOMEBREW_TAP_TOKEN`, `APT_REPO_TOKEN`, `WINGET_TOKEN`, Homebrew tap / APT repo / WinGet workflow 추가.
 
 관련 예시·프롬프트: [`examples/`](examples/) (`publish-apt-repo-my-cli.yml`, `apt-repo-release-prompt.md` 등)
 
@@ -541,6 +542,99 @@ sudo apt install my-cli
 3. APT repo clone → `pool/{component}/{letter}/{package}/`에 `.deb` 배치
 4. `dpkg-scanpackages` + `apt-ftparchive release`로 `Packages` / `Release` 재생성
 5. APT repo에 commit & push (또는 PR 생성)
+
+---
+
+# Publish WinGet Package
+
+GitHub Release의 Windows installer(`.exe`, `.msi`, `.zip` 등)에서 **WinGet manifest bump PR**을 `microsoft/winget-pkgs`에 제출합니다.  
+내부적으로 [vedantmgoyal9/winget-releaser](https://github.com/vedantmgoyal9/winget-releaser)(Komac)를 사용합니다.
+
+## 사전 준비
+
+- [microsoft/winget-pkgs](https://github.com/microsoft/winget-pkgs) fork (보통 workflow 실행 repo owner 계정)
+- **최소 1개 버전**이 winget-pkgs에 이미 머지되어 있어야 함 (최초 manifest는 수동 PR)
+- secret: `WINGET_TOKEN` — classic PAT, `public_repo` scope (fine-grained PAT 미지원)
+- GitHub Release에 Windows asset 업로드 **완료** 후 실행 (Release workflow `workflow_run` 권장)
+
+## 사용 방법 (lazyifconfig 예시)
+
+```yaml
+name: Publish WinGet Package
+
+on:
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  resolve-release:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success') }}
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - id: resolve
+        run: |
+          # tag/version resolve (see examples/publish-winget-lazyifconfig.yml)
+
+  publish-winget:
+    needs: resolve-release
+    uses: choihunchul/github--actions/.github/workflows/publish-winget.yml@main
+    with:
+      identifier: Choihunchul.Lazyifconfig
+      tag: ${{ needs.resolve-release.outputs.tag }}
+      version: ${{ needs.resolve-release.outputs.version }}
+      verify-tag: false
+      installers-regex: 'lazyifconfig-.*-x86_64-pc-windows-msvc\.zip$'
+    secrets:
+      WINGET_TOKEN: ${{ secrets.WINGET_TOKEN }}
+```
+
+설치 (PR 머지 후):
+
+```powershell
+winget install Choihunchul.Lazyifconfig
+```
+
+예시: [`examples/publish-winget-lazyifconfig.yml`](examples/publish-winget-lazyifconfig.yml)  
+프롬프트: [`examples/winget-release-prompt.md`](examples/winget-release-prompt.md)
+
+## 주요 Inputs
+
+| Input | Required | Description |
+| --- | --- | --- |
+| `identifier` | Yes | WinGet `PackageIdentifier` (예: `Choihunchul.Lazyifconfig`) |
+| `installers-regex` | No | Release asset 매칭 regex (기본: exe/msi/msix/appx) |
+| `fork-user` | No | winget-pkgs fork owner (기본: caller repo owner) |
+| `version` / `tag` | No | tag push / workflow_dispatch 시 지정 |
+| `tag-prefix` | No | tag 접두사 (기본 `v`) |
+| `verify-tag` | No | tag push 필수 여부 |
+| `max-versions-to-keep` | No | WinGet에 유지할 최대 버전 수 (`0` = 전부 유지) |
+| `release-notes-url` | No | 릴리즈 노트 URL |
+
+## Outputs
+
+| Output | Description |
+| --- | --- |
+| `version` | 제출한 package version |
+| `tag` | Git tag 이름 |
+| `release-repo-name` | Release asset 출처 repo 이름 |
+
+## 동작 방식
+
+1. tag/version resolve
+2. GitHub Release에서 regex에 맞는 Windows installer URL 수집
+3. Komac으로 winget-pkgs fork sync → manifest bump → PR 생성
 
 ---
 

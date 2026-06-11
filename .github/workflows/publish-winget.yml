@@ -1,0 +1,101 @@
+name: Publish WinGet Package
+
+on:
+  workflow_call:
+    inputs:
+      identifier:
+        description: WinGet PackageIdentifier (e.g. Choihunchul.Lazyifconfig)
+        required: true
+        type: string
+      release-repo:
+        description: Source repository for release assets
+        required: false
+        type: string
+        default: ""
+      version:
+        description: Package version
+        required: false
+        type: string
+        default: ""
+      tag:
+        description: Git tag
+        required: false
+        type: string
+        default: ""
+      tag-prefix:
+        description: Prefix stripped from git tag
+        required: false
+        type: string
+        default: v
+      verify-tag:
+        description: Require a tag push when version/tag are not provided
+        required: false
+        type: boolean
+        default: true
+      installers-regex:
+        description: Regular expression to match Windows installers from GitHub Release assets
+        required: false
+        type: string
+        default: '\.(exe|msi|msix|appx|zip)(bundle){0,1}$'
+      fork-user:
+        description: GitHub user or org where microsoft/winget-pkgs is forked
+        required: false
+        type: string
+        default: ""
+      max-versions-to-keep:
+        description: Maximum package versions to keep in WinGet (0 keeps all)
+        required: false
+        type: string
+        default: "0"
+      release-notes-url:
+        description: URL to release notes for this version
+        required: false
+        type: string
+        default: ""
+      winget-releaser-version:
+        description: vedantmgoyal9/winget-releaser ref to use
+        required: false
+        type: string
+        default: main
+    secrets:
+      WINGET_TOKEN:
+        description: GitHub token with public_repo scope for winget-pkgs pull requests
+        required: true
+    outputs:
+      version:
+        description: Published package version
+        value: ${{ jobs.publish.outputs.version }}
+      tag:
+        description: Git tag name
+        value: ${{ jobs.publish.outputs.tag }}
+      release-repo-name:
+        description: Repository name passed to winget-releaser
+        value: ${{ jobs.publish.outputs.release-repo-name }}
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.publish.outputs.version }}
+      tag: ${{ steps.publish.outputs.tag }}
+      release-repo-name: ${{ steps.publish.outputs.release-repo-name }}
+    steps:
+      - name: Publish WinGet package
+        id: publish
+        uses: choihunchul/github--actions/publish-winget@main
+        with:
+          github-token: ${{ secrets.WINGET_TOKEN }}
+          identifier: ${{ inputs.identifier }}
+          release-repo: ${{ inputs.release-repo }}
+          version: ${{ inputs.version }}
+          tag: ${{ inputs.tag }}
+          tag-prefix: ${{ inputs.tag-prefix }}
+          verify-tag: ${{ inputs.verify-tag }}
+          installers-regex: ${{ inputs.installers-regex }}
+          fork-user: ${{ inputs.fork-user }}
+          max-versions-to-keep: ${{ inputs.max-versions-to-keep }}
+          release-notes-url: ${{ inputs.release-notes-url }}
+          winget-releaser-version: ${{ inputs.winget-releaser-version }}

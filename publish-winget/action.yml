@@ -1,0 +1,125 @@
+name: Publish WinGet Package
+description: Submit a WinGet manifest update PR to microsoft/winget-pkgs from GitHub Release assets
+
+inputs:
+  github-token:
+    description: GitHub token with public_repo scope for winget-pkgs pull requests
+    required: true
+  identifier:
+    description: WinGet PackageIdentifier (e.g. Choihunchul.Lazyifconfig)
+    required: true
+  release-repo:
+    description: Source repository for release assets (defaults to github.repository)
+    required: false
+    default: ""
+  version:
+    description: Package version (defaults to git tag minus tag-prefix)
+    required: false
+    default: ""
+  tag:
+    description: Git tag (defaults to GITHUB_REF tag)
+    required: false
+    default: ""
+  tag-prefix:
+    description: Prefix stripped from git tag for version (e.g. v)
+    required: false
+    default: v
+  verify-tag:
+    description: Require a tag push when version/tag are not provided
+    required: false
+    default: "true"
+  installers-regex:
+    description: Regular expression to match Windows installers from GitHub Release assets
+    required: false
+    default: '\.(exe|msi|msix|appx|zip)(bundle){0,1}$'
+  fork-user:
+    description: GitHub user or org where microsoft/winget-pkgs is forked
+    required: false
+    default: ""
+  max-versions-to-keep:
+    description: Maximum package versions to keep in WinGet (0 keeps all)
+    required: false
+    default: "0"
+  release-notes-url:
+    description: URL to release notes for this version
+    required: false
+    default: ""
+  winget-releaser-version:
+    description: vedantmgoyal9/winget-releaser ref to use
+    required: false
+    default: main
+
+outputs:
+  version:
+    description: Published package version
+    value: ${{ steps.resolve.outputs.version }}
+  tag:
+    description: Git tag name
+    value: ${{ steps.resolve.outputs.tag }}
+  release-repo-name:
+    description: Repository name passed to winget-releaser
+    value: ${{ steps.resolve.outputs.release-repo-name }}
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve release metadata
+      id: resolve
+      shell: bash
+      env:
+        RELEASE_REPO: ${{ inputs.release-repo != '' && inputs.release-repo || github.repository }}
+        VERSION_INPUT: ${{ inputs.version }}
+        TAG_INPUT: ${{ inputs.tag }}
+        TAG_PREFIX: ${{ inputs.tag-prefix }}
+        VERIFY_TAG: ${{ inputs.verify-tag }}
+      run: |
+        set -euo pipefail
+
+        RAW_TAG="$TAG_INPUT"
+        if [[ -z "$RAW_TAG" && "$GITHUB_REF" == refs/tags/* ]]; then
+          RAW_TAG="${GITHUB_REF#refs/tags/}"
+        fi
+
+        if [[ -z "$RAW_TAG" && -z "$VERSION_INPUT" && "$VERIFY_TAG" == "true" ]]; then
+          echo "tag or version is required (got ref: $GITHUB_REF)" >&2
+          exit 1
+        fi
+
+        if [[ -z "$RAW_TAG" && -n "$VERSION_INPUT" ]]; then
+          RAW_TAG="${TAG_PREFIX}${VERSION_INPUT}"
+        fi
+
+        VERSION="${VERSION_INPUT:-$RAW_TAG}"
+        if [[ -n "$TAG_PREFIX" && "$VERSION" == "$TAG_PREFIX"* ]]; then
+          VERSION="${VERSION#"$TAG_PREFIX"}"
+        fi
+
+        if [[ -z "$RAW_TAG" ]]; then
+          RAW_TAG="${TAG_PREFIX}${VERSION}"
+        fi
+
+        if [[ -z "$VERSION" || -z "$RAW_TAG" ]]; then
+          echo "version and tag could not be resolved" >&2
+          exit 1
+        fi
+
+        RELEASE_REPO_NAME="${RELEASE_REPO##*/}"
+
+        {
+          echo "version=$VERSION"
+          echo "tag=$RAW_TAG"
+          echo "release-repo-name=$RELEASE_REPO_NAME"
+        } >> "$GITHUB_OUTPUT"
+
+    - name: Publish WinGet package
+      uses: vedantmgoyal9/winget-releaser@${{ inputs.winget-releaser-version }}
+      with:
+        identifier: ${{ inputs.identifier }}
+        version: ${{ steps.resolve.outputs.version }}
+        installers-regex: ${{ inputs.installers-regex }}
+        max-versions-to-keep: ${{ inputs.max-versions-to-keep }}
+        release-repository: ${{ steps.resolve.outputs.release-repo-name }}
+        release-tag: ${{ steps.resolve.outputs.tag }}
+        release-notes-url: ${{ inputs.release-notes-url }}
+        token: ${{ inputs.github-token }}
+        fork-user: ${{ inputs.fork-user != '' && inputs.fork-user || github.repository_owner }}
