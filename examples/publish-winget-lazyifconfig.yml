@@ -42,6 +42,7 @@ jobs:
         env:
           INPUT_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || '' }}
           HEAD_BRANCH: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || '' }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
 
@@ -50,13 +51,20 @@ jobs:
           elif [[ "${HEAD_BRANCH}" == v* ]]; then
             raw_tag="${HEAD_BRANCH}"
           else
-            echo "Could not resolve release tag" >&2
-            exit 1
+            raw_tag="$(
+              curl -fsSL \
+                -H "Authorization: Bearer ${GH_TOKEN}" \
+                -H "Accept: application/vnd.github+json" \
+                "${GITHUB_API_URL}/repos/${{ github.repository }}/releases/latest" \
+              | jq -r '.tag_name'
+            )"
           fi
 
           version="${raw_tag#v}"
-          echo "tag=${raw_tag}" >> "$GITHUB_OUTPUT"
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          tag="v${version}"
+
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
 
   publish-winget:
     name: Publish to WinGet
