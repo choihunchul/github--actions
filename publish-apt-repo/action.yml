@@ -1,0 +1,306 @@
+name: Publish APT Repository
+description: Download .deb release assets and update a Git-hosted APT repository
+
+inputs:
+  github-token:
+    description: GitHub token with write access to the APT repository
+    required: false
+    default: ""
+  apt-repo:
+    description: APT repository (owner/repo)
+    required: true
+  apt-branch:
+    description: Branch in the APT repository to update
+    required: false
+    default: main
+  package-name:
+    description: Debian package name used for pool/ layout
+    required: true
+  codename:
+    description: APT suite/codename (e.g. stable, jammy)
+    required: false
+    default: stable
+  component:
+    description: APT component (e.g. main)
+    required: false
+    default: main
+  release-repo:
+    description: Source repository for release assets (defaults to github.repository)
+    required: false
+    default: ""
+  version:
+    description: Version string (defaults to git tag minus tag-prefix)
+    required: false
+    default: ""
+  tag:
+    description: Git tag (defaults to GITHUB_REF tag)
+    required: false
+    default: ""
+  tag-prefix:
+    description: Prefix stripped from git tag for version (e.g. v)
+    required: false
+    default: v
+  verify-tag:
+    description: Require a tag push when version/tag are not provided
+    required: false
+    default: "true"
+  asset-amd64:
+    description: amd64 .deb release asset ({tag}, {version} supported)
+    required: false
+    default: ""
+  asset-arm64:
+    description: arm64 .deb release asset
+    required: false
+    default: ""
+  asset-armhf:
+    description: armhf .deb release asset
+    required: false
+    default: ""
+  asset-all:
+    description: architecture-independent .deb release asset
+    required: false
+    default: ""
+  remove-old-versions:
+    description: Remove older .deb files for this package from pool before adding the new release
+    required: false
+    default: "true"
+  commit-message:
+    description: Commit message ({package}, {version}, {tag})
+    required: false
+    default: ""
+  create-pr:
+    description: Create a pull request instead of pushing directly
+    required: false
+    default: "false"
+  pr-base-branch:
+    description: Base branch for pull request
+    required: false
+    default: main
+  pr-branch-prefix:
+    description: Prefix for the pull request branch name
+    required: false
+    default: bump-
+
+outputs:
+  version:
+    description: Published package version
+    value: ${{ steps.publish.outputs.version }}
+  tag:
+    description: Git tag name
+    value: ${{ steps.publish.outputs.tag }}
+  pool-path:
+    description: Pool directory path inside the APT repository
+    value: ${{ steps.publish.outputs.pool-path }}
+  commit-sha:
+    description: Commit SHA in the APT repository
+    value: ${{ steps.publish.outputs.commit-sha }}
+  pull-request-url:
+    description: Pull request URL when create-pr is true
+    value: ${{ steps.publish.outputs.pull-request-url }}
+
+runs:
+  using: composite
+  steps:
+    - name: Install APT repository tools
+      shell: bash
+      run: |
+        set -euo pipefail
+        sudo apt-get update -qq
+        sudo apt-get install -y -qq dpkg-dev apt-utils gzip
+
+    - name: Publish APT repository
+      id: publish
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token != '' && inputs.github-token || github.token }}
+        APT_REPO: ${{ inputs.apt-repo }}
+        APT_BRANCH: ${{ inputs.apt-branch }}
+        PACKAGE_NAME: ${{ inputs.package-name }}
+        CODENAME: ${{ inputs.codename }}
+        COMPONENT: ${{ inputs.component }}
+        RELEASE_REPO: ${{ inputs.release-repo != '' && inputs.release-repo || github.repository }}
+        VERSION_INPUT: ${{ inputs.version }}
+        TAG_INPUT: ${{ inputs.tag }}
+        TAG_PREFIX: ${{ inputs.tag-prefix }}
+        VERIFY_TAG: ${{ inputs.verify-tag }}
+        ASSET_AMD64: ${{ inputs.asset-amd64 }}
+        ASSET_ARM64: ${{ inputs.asset-arm64 }}
+        ASSET_ARMHF: ${{ inputs.asset-armhf }}
+        ASSET_ALL: ${{ inputs.asset-all }}
+        REMOVE_OLD_VERSIONS: ${{ inputs.remove-old-versions }}
+        COMMIT_MESSAGE_INPUT: ${{ inputs.commit-message }}
+        CREATE_PR: ${{ inputs.create-pr }}
+        PR_BASE_BRANCH: ${{ inputs.pr-base-branch }}
+        PR_BRANCH_PREFIX: ${{ inputs.pr-branch-prefix }}
+      run: |
+        set -euo pipefail
+
+        RAW_TAG="$TAG_INPUT"
+        if [[ -z "$RAW_TAG" && "$GITHUB_REF" == refs/tags/* ]]; then
+          RAW_TAG="${GITHUB_REF#refs/tags/}"
+        fi
+
+        if [[ -z "$RAW_TAG" && -z "$VERSION_INPUT" && "$VERIFY_TAG" == "true" ]]; then
+          echo "tag or version is required (got ref: $GITHUB_REF)" >&2
+          exit 1
+        fi
+
+        if [[ -z "$RAW_TAG" && -n "$VERSION_INPUT" ]]; then
+          RAW_TAG="${TAG_PREFIX}${VERSION_INPUT}"
+        fi
+
+        VERSION="${VERSION_INPUT:-$RAW_TAG}"
+        if [[ -n "$TAG_PREFIX" && "$VERSION" == "$TAG_PREFIX"* ]]; then
+          VERSION="${VERSION#"$TAG_PREFIX"}"
+        fi
+
+        if [[ -z "$VERSION" ]]; then
+          echo "version could not be resolved" >&2
+          exit 1
+        fi
+
+        if [[ -z "$ASSET_AMD64$ASSET_ARM64$ASSET_ARMHF$ASSET_ALL" ]]; then
+          echo "At least one .deb asset input is required" >&2
+          exit 1
+        fi
+
+        expand_template() {
+          local value="$1"
+          value="${value//\{tag\}/$RAW_TAG}"
+          value="${value//\{version\}/$VERSION}"
+          printf '%s' "$value"
+        }
+
+        download_release_asset() {
+          local asset_template="$1"
+          local output_path="$2"
+          local asset_name url
+          asset_name="$(expand_template "$asset_template")"
+          url=$(gh release view "$RAW_TAG" \
+            --repo "$RELEASE_REPO" \
+            --json assets \
+            --jq ".assets[] | select(.name == \"$asset_name\") | .browser_download_url")
+          if [[ -z "$url" ]]; then
+            url="https://github.com/${RELEASE_REPO}/releases/download/${RAW_TAG}/${asset_name}"
+          fi
+          echo "Downloading ${asset_name}" >&2
+          curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/octet-stream" \
+            -o "$output_path" \
+            "$url"
+        }
+
+        WORKDIR=$(mktemp -d)
+        trap 'rm -rf "$WORKDIR"' EXIT
+
+        git clone --depth=1 -b "$APT_BRANCH" \
+          "https://x-access-token:${GH_TOKEN}@github.com/${APT_REPO}.git" \
+          "$WORKDIR/apt"
+
+        cd "$WORKDIR/apt"
+
+        POOL_LETTER="${PACKAGE_NAME:0:1}"
+        POOL_DIR="pool/${COMPONENT}/${POOL_LETTER}/${PACKAGE_NAME}"
+        mkdir -p "$POOL_DIR"
+
+        if [[ "$REMOVE_OLD_VERSIONS" == "true" ]]; then
+          find "$POOL_DIR" -maxdepth 1 -type f -name '*.deb' -delete
+        fi
+
+        declare -a ARCHS=()
+
+        add_asset() {
+          local asset_template="$1"
+          local arch="$2"
+          local deb_path
+          deb_path="$WORKDIR/$(expand_template "$asset_template")"
+          download_release_asset "$asset_template" "$deb_path"
+          cp "$deb_path" "$POOL_DIR/"
+          ARCHS+=("$arch")
+        }
+
+        if [[ -n "$ASSET_AMD64" ]]; then
+          add_asset "$ASSET_AMD64" "amd64"
+        fi
+        if [[ -n "$ASSET_ARM64" ]]; then
+          add_asset "$ASSET_ARM64" "arm64"
+        fi
+        if [[ -n "$ASSET_ARMHF" ]]; then
+          add_asset "$ASSET_ARMHF" "armhf"
+        fi
+        if [[ -n "$ASSET_ALL" ]]; then
+          add_asset "$ASSET_ALL" "all"
+        fi
+
+        regenerate_arch_index() {
+          local arch="$1"
+          local packages_dir="dists/${CODENAME}/${COMPONENT}/binary-${arch}"
+          mkdir -p "$packages_dir"
+          dpkg-scanpackages --arch "$arch" --multiversion pool/ > "${packages_dir}/Packages"
+          gzip -9kf "${packages_dir}/Packages"
+        }
+
+        for arch in "${ARCHS[@]}"; do
+          regenerate_arch_index "$arch"
+        done
+
+        for packages_dir in dists/${CODENAME}/${COMPONENT}/binary-*/; do
+          [[ -d "$packages_dir" ]] || continue
+          arch="${packages_dir%/}"
+          arch="${arch##*/binary-}"
+          if [[ " ${ARCHS[*]} " != *" ${arch} "* ]]; then
+            regenerate_arch_index "$arch"
+          fi
+        done
+
+        mkdir -p "dists/${CODENAME}"
+        (
+          cd "dists/${CODENAME}"
+          apt-ftparchive release . > Release
+        )
+
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+        COMMIT_MESSAGE="$COMMIT_MESSAGE_INPUT"
+        if [[ -z "$COMMIT_MESSAGE" ]]; then
+          COMMIT_MESSAGE="Publish ${PACKAGE_NAME} ${VERSION} to APT repository"
+        else
+          COMMIT_MESSAGE="${COMMIT_MESSAGE//\{package\}/$PACKAGE_NAME}"
+          COMMIT_MESSAGE="${COMMIT_MESSAGE//\{version\}/$VERSION}"
+          COMMIT_MESSAGE="${COMMIT_MESSAGE//\{tag\}/$RAW_TAG}"
+        fi
+
+        git add pool/ "dists/${CODENAME}/"
+
+        if git diff --cached --quiet; then
+          echo "APT repository already up to date"
+        else
+          PR_URL=""
+          COMMIT_SHA=""
+
+          if [[ "$CREATE_PR" == "true" ]]; then
+            PR_BRANCH="${PR_BRANCH_PREFIX}${PACKAGE_NAME}-${VERSION}"
+            git checkout -b "$PR_BRANCH"
+            git commit -m "$COMMIT_MESSAGE"
+            git push origin "HEAD:refs/heads/$PR_BRANCH"
+            PR_URL=$(gh pr create \
+              --repo "$APT_REPO" \
+              --base "$PR_BASE_BRANCH" \
+              --head "$PR_BRANCH" \
+              --title "$COMMIT_MESSAGE" \
+              --body "Automated APT publish from ${RELEASE_REPO}@${RAW_TAG}")
+          else
+            git commit -m "$COMMIT_MESSAGE"
+            git push origin "HEAD:refs/heads/$APT_BRANCH"
+            COMMIT_SHA=$(git rev-parse HEAD)
+          fi
+
+          echo "commit-sha=$COMMIT_SHA" >> "$GITHUB_OUTPUT"
+          echo "pull-request-url=$PR_URL" >> "$GITHUB_OUTPUT"
+        fi
+
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+        echo "tag=$RAW_TAG" >> "$GITHUB_OUTPUT"
+        echo "pool-path=$POOL_DIR" >> "$GITHUB_OUTPUT"

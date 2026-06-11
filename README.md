@@ -11,6 +11,21 @@
 | Update Homebrew Formula | [`update-homebrew-formula/`](update-homebrew-formula/) | Homebrew tap formula url/sha256/version 갱신 (단일 asset) |
 | Publish Homebrew Formula | [`publish-homebrew-formula/`](publish-homebrew-formula/) | multi-platform Formula 생성·배포 |
 | Publish Homebrew Cask | [`publish-homebrew-cask/`](publish-homebrew-cask/) | macOS Cask 생성·배포 |
+| Publish APT Repository | [`publish-apt-repo/`](publish-apt-repo/) | GitHub Release `.deb` → APT repo 게시 |
+
+## Cursor Skill
+
+다른 저장소에 위 액션을 연동할 때 Cursor Agent skill **`github-actions-deploy`** 를 사용하세요.
+
+| | |
+| --- | --- |
+| 경로 | `~/.cursor/skills/github-actions-deploy/` |
+| SKILL.md | 액션 선택, reusable workflow wrapper, secrets, pitfalls |
+| reference.md | 액션별 inputs, triggers, troubleshooting |
+
+트리거 예: `github--actions`, `publish-apt-repo`, `HOMEBREW_TAP_TOKEN`, `APT_REPO_TOKEN`, Homebrew tap / APT repo workflow 추가.
+
+관련 예시·프롬프트: [`examples/`](examples/) (`publish-apt-repo-my-cli.yml`, `apt-repo-release-prompt.md` 등)
 
 ---
 
@@ -398,6 +413,134 @@ brew install --cask choihunchul/tap/codex-menu-bar
 | `zap-trash` | No | uninstall 시 삭제 경로 (공백 구분) |
 
 \* `asset-name` 또는 `download-url` 중 하나 필수.
+
+---
+
+# Publish APT Repository
+
+GitHub Release에 업로드된 `.deb` 파일을 **Git-hosted APT repository**에 게시하는 공통 GitHub Action입니다.  
+Homebrew tap과 같은 패턴으로, 별도 APT repo를 clone → pool에 `.deb` 추가 → `Packages` / `Release` 재생성 → push 합니다.
+
+## 사전 준비
+
+- APT repo: 예) `choihunchul/apt-repo` (GitHub Pages로 호스팅 권장)
+- secret: `APT_REPO_TOKEN` (workflow 실행 repo에 등록, APT repo push 권한)
+- GitHub Release에 아키텍처별 `.deb` asset 업로드 완료
+- APT repo 초기 구조 (최초 1회):
+
+```text
+pool/
+dists/stable/main/binary-amd64/
+dists/stable/main/binary-arm64/
+```
+
+## 사용 방법 (my-cli 예시)
+
+### 1. Composite Action (권장)
+
+```yaml
+name: Publish APT Repository
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  publish-apt:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish APT repository
+        uses: choihunchul/github--actions/publish-apt-repo@main
+        with:
+          github-token: ${{ secrets.APT_REPO_TOKEN }}
+          apt-repo: choihunchul/apt-repo
+          package-name: my-cli
+          asset-amd64: my-cli_{version}_amd64.deb
+          asset-arm64: my-cli_{version}_arm64.deb
+```
+
+### 2. Reusable Workflow
+
+```yaml
+name: Publish APT Repository
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish-apt:
+    uses: choihunchul/github--actions/.github/workflows/publish-apt-repo.yml@main
+    with:
+      apt-repo: choihunchul/apt-repo
+      package-name: my-cli
+      asset-amd64: my-cli_{version}_amd64.deb
+      asset-arm64: my-cli_{version}_arm64.deb
+      version: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
+      verify-tag: ${{ github.event_name != 'workflow_dispatch' }}
+    secrets:
+      APT_REPO_TOKEN: ${{ secrets.APT_REPO_TOKEN }}
+```
+
+설치:
+
+```bash
+echo "deb [trusted=yes] https://choihunchul.github.io/apt-repo stable main" | sudo tee /etc/apt/sources.list.d/choihunchul.list
+sudo apt update
+sudo apt install my-cli
+```
+
+예시: [`examples/publish-apt-repo-my-cli.yml`](examples/publish-apt-repo-my-cli.yml)
+
+## 주요 Inputs
+
+| Input | Required | Description |
+| --- | --- | --- |
+| `apt-repo` | Yes | APT 저장소 (`owner/apt-repo`) |
+| `package-name` | Yes | Debian package name (pool 경로용) |
+| `asset-amd64/arm64/armhf/all` | No* | Release `.deb` asset (`{tag}`, `{version}` 치환) |
+| `codename` | No | APT suite (기본 `stable`) |
+| `component` | No | APT component (기본 `main`) |
+| `apt-branch` | No | 갱신할 branch (기본 `main`) |
+| `release-repo` | No | Release asset 출처 repo (기본 caller repo) |
+| `version` / `tag` | No | tag push 시 자동 추출 |
+| `tag-prefix` | No | tag 접두사 (기본 `v`) |
+| `verify-tag` | No | tag push 필수 여부 |
+| `remove-old-versions` | No | pool에서 이전 `.deb` 삭제 (기본 `true`) |
+| `create-pr` | No | 직접 push 대신 PR 생성 |
+
+\* `.deb` asset input 중 하나 이상 필수.
+
+## Outputs
+
+| Output | Description |
+| --- | --- |
+| `version` | 게시된 package version |
+| `tag` | Git tag 이름 |
+| `pool-path` | APT repo 내 pool 경로 |
+| `commit-sha` | APT repo 커밋 SHA (`create-pr: false`) |
+| `pull-request-url` | 생성된 PR URL (`create-pr: true`) |
+
+## 동작 방식
+
+1. tag에서 version 추출 (`v1.0.0` → `1.0.0`)
+2. GitHub Release에서 아키텍처별 `.deb` 다운로드
+3. APT repo clone → `pool/{component}/{letter}/{package}/`에 `.deb` 배치
+4. `dpkg-scanpackages` + `apt-ftparchive release`로 `Packages` / `Release` 재생성
+5. APT repo에 commit & push (또는 PR 생성)
 
 ---
 

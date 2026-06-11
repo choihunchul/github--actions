@@ -1,0 +1,156 @@
+name: Publish APT Repository
+
+on:
+  workflow_call:
+    inputs:
+      apt-repo:
+        description: APT repository (owner/repo)
+        required: true
+        type: string
+      apt-branch:
+        description: Branch in the APT repository to update
+        required: false
+        type: string
+        default: main
+      package-name:
+        description: Debian package name used for pool/ layout
+        required: true
+        type: string
+      codename:
+        description: APT suite/codename
+        required: false
+        type: string
+        default: stable
+      component:
+        description: APT component
+        required: false
+        type: string
+        default: main
+      release-repo:
+        description: Source repository for release assets
+        required: false
+        type: string
+        default: ""
+      version:
+        description: Version string
+        required: false
+        type: string
+        default: ""
+      tag:
+        description: Git tag
+        required: false
+        type: string
+        default: ""
+      tag-prefix:
+        description: Prefix stripped from git tag
+        required: false
+        type: string
+        default: v
+      verify-tag:
+        description: Require a tag push when version/tag are not provided
+        required: false
+        type: boolean
+        default: true
+      asset-amd64:
+        description: amd64 .deb release asset
+        required: false
+        type: string
+        default: ""
+      asset-arm64:
+        description: arm64 .deb release asset
+        required: false
+        type: string
+        default: ""
+      asset-armhf:
+        description: armhf .deb release asset
+        required: false
+        type: string
+        default: ""
+      asset-all:
+        description: architecture-independent .deb release asset
+        required: false
+        type: string
+        default: ""
+      remove-old-versions:
+        description: Remove older .deb files for this package from pool
+        required: false
+        type: boolean
+        default: true
+      commit-message:
+        description: Commit message
+        required: false
+        type: string
+        default: ""
+      create-pr:
+        description: Create a pull request instead of pushing directly
+        required: false
+        type: boolean
+        default: false
+      pr-base-branch:
+        description: Base branch for pull request
+        required: false
+        type: string
+        default: main
+      pr-branch-prefix:
+        description: Prefix for the pull request branch name
+        required: false
+        type: string
+        default: bump-
+    secrets:
+      APT_REPO_TOKEN:
+        description: GitHub token with write access to the APT repository
+        required: false
+    outputs:
+      version:
+        description: Published package version
+        value: ${{ jobs.publish.outputs.version }}
+      tag:
+        description: Git tag name
+        value: ${{ jobs.publish.outputs.tag }}
+      pool-path:
+        description: Pool directory path inside the APT repository
+        value: ${{ jobs.publish.outputs.pool-path }}
+      commit-sha:
+        description: Commit SHA in the APT repository
+        value: ${{ jobs.publish.outputs.commit-sha }}
+      pull-request-url:
+        description: Pull request URL when create-pr is true
+        value: ${{ jobs.publish.outputs.pull-request-url }}
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.publish.outputs.version }}
+      tag: ${{ steps.publish.outputs.tag }}
+      pool-path: ${{ steps.publish.outputs.pool-path }}
+      commit-sha: ${{ steps.publish.outputs.commit-sha }}
+      pull-request-url: ${{ steps.publish.outputs.pull-request-url }}
+    steps:
+      - name: Publish APT repository
+        id: publish
+        uses: choihunchul/github--actions/publish-apt-repo@main
+        with:
+          github-token: ${{ secrets.APT_REPO_TOKEN != '' && secrets.APT_REPO_TOKEN || github.token }}
+          apt-repo: ${{ inputs.apt-repo }}
+          apt-branch: ${{ inputs.apt-branch }}
+          package-name: ${{ inputs.package-name }}
+          codename: ${{ inputs.codename }}
+          component: ${{ inputs.component }}
+          release-repo: ${{ inputs.release-repo }}
+          version: ${{ inputs.version }}
+          tag: ${{ inputs.tag }}
+          tag-prefix: ${{ inputs.tag-prefix }}
+          verify-tag: ${{ inputs.verify-tag }}
+          asset-amd64: ${{ inputs.asset-amd64 }}
+          asset-arm64: ${{ inputs.asset-arm64 }}
+          asset-armhf: ${{ inputs.asset-armhf }}
+          asset-all: ${{ inputs.asset-all }}
+          remove-old-versions: ${{ inputs.remove-old-versions }}
+          commit-message: ${{ inputs.commit-message }}
+          create-pr: ${{ inputs.create-pr }}
+          pr-base-branch: ${{ inputs.pr-base-branch }}
+          pr-branch-prefix: ${{ inputs.pr-branch-prefix }}
