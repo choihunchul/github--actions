@@ -1,0 +1,39 @@
+# codex-menu-bar 저장소에 복사해 사용하는 예시 워크플로우
+#
+# Git tag push 또는 수동 실행 후 choihunchul/homebrew-tap cask를 갱신합니다.
+#
+# 필요한 secrets:
+#   HOMEBREW_TAP_TOKEN - tap repo push 권한 PAT (repo scope)
+
+name: Publish Homebrew Cask
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, e.g. 1.0.7 or v1.0.7"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish-cask:
+    uses: choihunchul/github--actions/.github/workflows/publish-homebrew-cask.yml@main
+    with:
+      tap-repo: choihunchul/homebrew-tap
+      cask-name: codex-menu-bar
+      name: Codex Menu Bar
+      desc: macOS menu bar companion for Codex, Cursor, and Antigravity
+      homepage: https://github.com/choihunchul/codex-menu-bar
+      app-name: CodexMenuBar.app
+      asset-name: CodexMenuBar.dmg
+      zap-trash: ~/.codex-menu-bar
+      version: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
+      verify-tag: ${{ github.event_name != 'workflow_dispatch' }}
+    secrets:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

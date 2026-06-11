@@ -1,0 +1,40 @@
+# lazyifconfig 저장소에 복사해 사용하는 예시 워크플로우
+#
+# Git tag push 또는 수동 실행 후 choihunchul/homebrew-tap formula를 갱신합니다.
+#
+# 필요한 secrets:
+#   HOMEBREW_TAP_TOKEN - tap repo push 권한 PAT (repo scope)
+
+name: Publish Homebrew Tap
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, e.g. 0.2.4 or v0.2.4"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish-tap:
+    uses: choihunchul/github--actions/.github/workflows/publish-homebrew-formula.yml@main
+    with:
+      tap-repo: choihunchul/homebrew-tap
+      formula-name: lazyifconfig
+      desc: Terminal UI for inspecting local network state
+      homepage: https://github.com/choihunchul/lazyifconfig
+      license: MIT
+      binary-name: lazyifconfig
+      asset-macos-intel: lazyifconfig-{tag}-x86_64-apple-darwin.tar.gz
+      asset-macos-arm: lazyifconfig-{tag}-aarch64-apple-darwin.tar.gz
+      asset-linux-intel: lazyifconfig-{tag}-x86_64-unknown-linux-gnu.tar.gz
+      version: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
+      verify-tag: ${{ github.event_name != 'workflow_dispatch' }}
+    secrets:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

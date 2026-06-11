@@ -1,0 +1,172 @@
+name: Publish Homebrew Cask
+
+on:
+  workflow_call:
+    inputs:
+      tap-repo:
+        description: Tap repository (owner/repo)
+        required: true
+        type: string
+      cask-name:
+        description: Cask name without .rb extension
+        required: true
+        type: string
+      cask-path:
+        description: Cask path inside the tap repository
+        required: false
+        type: string
+        default: ""
+      tap-branch:
+        description: Branch in the tap repository to update
+        required: false
+        type: string
+        default: main
+      release-repo:
+        description: Source repository for release assets
+        required: false
+        type: string
+        default: ""
+      version:
+        description: Version string
+        required: false
+        type: string
+        default: ""
+      tag:
+        description: Git tag
+        required: false
+        type: string
+        default: ""
+      tag-prefix:
+        description: Prefix stripped from git tag
+        required: false
+        type: string
+        default: v
+      verify-tag:
+        description: Require a tag push when version/tag are not provided
+        required: false
+        type: boolean
+        default: true
+      name:
+        description: Cask display name
+        required: true
+        type: string
+      desc:
+        description: Cask description
+        required: true
+        type: string
+      homepage:
+        description: Cask homepage URL
+        required: true
+        type: string
+      app-name:
+        description: Application bundle name inside the DMG
+        required: true
+        type: string
+      asset-name:
+        description: Release asset filename
+        required: false
+        type: string
+        default: ""
+      download-url:
+        description: Direct download URL
+        required: false
+        type: string
+        default: ""
+      sha256:
+        description: SHA256 checksum
+        required: false
+        type: string
+        default: ""
+      zap-trash:
+        description: Space-separated paths for zap trash
+        required: false
+        type: string
+        default: ""
+      commit-message:
+        description: Commit message
+        required: false
+        type: string
+        default: ""
+      create-pr:
+        description: Create a pull request instead of pushing directly
+        required: false
+        type: boolean
+        default: false
+      pr-base-branch:
+        description: Base branch for pull request
+        required: false
+        type: string
+        default: main
+      pr-branch-prefix:
+        description: Prefix for the pull request branch name
+        required: false
+        type: string
+        default: bump-
+    secrets:
+      HOMEBREW_TAP_TOKEN:
+        description: GitHub token with write access to the tap repository
+        required: false
+    outputs:
+      version:
+        description: Cask version
+        value: ${{ jobs.publish.outputs.version }}
+      tag:
+        description: Git tag name
+        value: ${{ jobs.publish.outputs.tag }}
+      download-url:
+        description: Resolved download URL
+        value: ${{ jobs.publish.outputs.download-url }}
+      sha256:
+        description: SHA256 checksum
+        value: ${{ jobs.publish.outputs.sha256 }}
+      cask-path:
+        description: Cask path inside the tap repository
+        value: ${{ jobs.publish.outputs.cask-path }}
+      commit-sha:
+        description: Commit SHA in the tap repository
+        value: ${{ jobs.publish.outputs.commit-sha }}
+      pull-request-url:
+        description: Pull request URL when create-pr is true
+        value: ${{ jobs.publish.outputs.pull-request-url }}
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.publish.outputs.version }}
+      tag: ${{ steps.publish.outputs.tag }}
+      download-url: ${{ steps.publish.outputs.download-url }}
+      sha256: ${{ steps.publish.outputs.sha256 }}
+      cask-path: ${{ steps.publish.outputs.cask-path }}
+      commit-sha: ${{ steps.publish.outputs.commit-sha }}
+      pull-request-url: ${{ steps.publish.outputs.pull-request-url }}
+    steps:
+      - name: Publish cask
+        id: publish
+        uses: choihunchul/github--actions/publish-homebrew-cask@main
+        with:
+          github-token: ${{ secrets.HOMEBREW_TAP_TOKEN != '' && secrets.HOMEBREW_TAP_TOKEN || github.token }}
+          tap-repo: ${{ inputs.tap-repo }}
+          cask-name: ${{ inputs.cask-name }}
+          cask-path: ${{ inputs.cask-path }}
+          tap-branch: ${{ inputs.tap-branch }}
+          release-repo: ${{ inputs.release-repo }}
+          version: ${{ inputs.version }}
+          tag: ${{ inputs.tag }}
+          tag-prefix: ${{ inputs.tag-prefix }}
+          verify-tag: ${{ inputs.verify-tag }}
+          name: ${{ inputs.name }}
+          desc: ${{ inputs.desc }}
+          homepage: ${{ inputs.homepage }}
+          app-name: ${{ inputs.app-name }}
+          asset-name: ${{ inputs.asset-name }}
+          download-url: ${{ inputs.download-url }}
+          sha256: ${{ inputs.sha256 }}
+          zap-trash: ${{ inputs.zap-trash }}
+          commit-message: ${{ inputs.commit-message }}
+          create-pr: ${{ inputs.create-pr }}
+          pr-base-branch: ${{ inputs.pr-base-branch }}
+          pr-branch-prefix: ${{ inputs.pr-branch-prefix }}

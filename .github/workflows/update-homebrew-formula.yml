@@ -1,0 +1,134 @@
+name: Update Homebrew Formula
+
+on:
+  workflow_call:
+    inputs:
+      tap-repo:
+        description: Tap repository (owner/repo)
+        required: true
+        type: string
+      formula-name:
+        description: Formula name without .rb extension
+        required: true
+        type: string
+      formula-path:
+        description: Formula path inside the tap repository
+        required: false
+        type: string
+        default: ""
+      tap-branch:
+        description: Branch in the tap repository to update
+        required: false
+        type: string
+        default: main
+      download-url:
+        description: Download URL for the release asset
+        required: false
+        type: string
+        default: ""
+      asset-name:
+        description: Release asset filename
+        required: false
+        type: string
+        default: ""
+      version:
+        description: Version string (defaults to git tag minus tag-prefix)
+        required: false
+        type: string
+        default: ""
+      tag-prefix:
+        description: Prefix stripped from git tag
+        required: false
+        type: string
+        default: v
+      sha256:
+        description: SHA256 checksum
+        required: false
+        type: string
+        default: ""
+      verify-tag:
+        description: Require a tag push
+        required: false
+        type: boolean
+        default: true
+      commit-message:
+        description: Commit message
+        required: false
+        type: string
+        default: ""
+      create-pr:
+        description: Create a pull request instead of pushing directly
+        required: false
+        type: boolean
+        default: false
+      pr-base-branch:
+        description: Base branch for pull request
+        required: false
+        type: string
+        default: main
+      pr-branch-prefix:
+        description: Prefix for the pull request branch name
+        required: false
+        type: string
+        default: bump-
+    secrets:
+      HOMEBREW_TAP_TOKEN:
+        description: GitHub token with write access to the tap repository
+        required: false
+    outputs:
+      version:
+        description: Formula version
+        value: ${{ jobs.update.outputs.version }}
+      tag:
+        description: Git tag name
+        value: ${{ jobs.update.outputs.tag }}
+      download-url:
+        description: Resolved download URL
+        value: ${{ jobs.update.outputs.download-url }}
+      sha256:
+        description: SHA256 checksum
+        value: ${{ jobs.update.outputs.sha256 }}
+      formula-path:
+        description: Formula path inside the tap repository
+        value: ${{ jobs.update.outputs.formula-path }}
+      commit-sha:
+        description: Commit SHA in the tap repository
+        value: ${{ jobs.update.outputs.commit-sha }}
+      pull-request-url:
+        description: Pull request URL when create-pr is true
+        value: ${{ jobs.update.outputs.pull-request-url }}
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.update.outputs.version }}
+      tag: ${{ steps.update.outputs.tag }}
+      download-url: ${{ steps.update.outputs.download-url }}
+      sha256: ${{ steps.update.outputs.sha256 }}
+      formula-path: ${{ steps.update.outputs.formula-path }}
+      commit-sha: ${{ steps.update.outputs.commit-sha }}
+      pull-request-url: ${{ steps.update.outputs.pull-request-url }}
+    steps:
+      - name: Update Homebrew formula
+        id: update
+        uses: choihunchul/github--actions/update-homebrew-formula@main
+        with:
+          github-token: ${{ secrets.HOMEBREW_TAP_TOKEN != '' && secrets.HOMEBREW_TAP_TOKEN || github.token }}
+          tap-repo: ${{ inputs.tap-repo }}
+          formula-name: ${{ inputs.formula-name }}
+          formula-path: ${{ inputs.formula-path }}
+          tap-branch: ${{ inputs.tap-branch }}
+          download-url: ${{ inputs.download-url }}
+          asset-name: ${{ inputs.asset-name }}
+          version: ${{ inputs.version }}
+          tag-prefix: ${{ inputs.tag-prefix }}
+          sha256: ${{ inputs.sha256 }}
+          verify-tag: ${{ inputs.verify-tag }}
+          commit-message: ${{ inputs.commit-message }}
+          create-pr: ${{ inputs.create-pr }}
+          pr-base-branch: ${{ inputs.pr-base-branch }}
+          pr-branch-prefix: ${{ inputs.pr-branch-prefix }}

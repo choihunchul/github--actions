@@ -1,0 +1,32 @@
+# CLI 저장소에 복사해 사용하는 예시 워크플로우
+#
+# Git tag push 후 Homebrew tap formula의 url / sha256 / version을 갱신합니다.
+#
+# 필요한 secrets:
+#   HOMEBREW_TAP_TOKEN - tap repo에 push 권한이 있는 PAT (repo scope)
+#
+# tap repo에 formula가 미리 있어야 합니다:
+#   Formula/my-cli.rb
+
+name: Update Homebrew formula
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  homebrew:
+    uses: choihunchul/github--actions/.github/workflows/update-homebrew-formula.yml@main
+    with:
+      tap-repo: choihunchul/homebrew-tap
+      formula-name: my-cli
+      download-url: https://github.com/choihunchul/my-cli/releases/download/{tag}/my-cli-{version}-darwin-arm64.tar.gz
+      # asset-name: my-cli-darwin-arm64.tar.gz
+      tag-prefix: v
+    secrets:
+      HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

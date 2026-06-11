@@ -1,0 +1,285 @@
+name: Publish Homebrew Cask
+description: Generate or bump a Homebrew tap cask from a GitHub Release asset
+
+inputs:
+  github-token:
+    description: GitHub token with write access to the tap repository
+    required: false
+    default: ""
+  tap-repo:
+    description: Tap repository (owner/repo)
+    required: true
+  cask-name:
+    description: Cask name without .rb extension
+    required: true
+  cask-path:
+    description: Cask path inside the tap repository
+    required: false
+    default: ""
+  tap-branch:
+    description: Branch in the tap repository to update
+    required: false
+    default: main
+  release-repo:
+    description: Source repository for release assets (defaults to github.repository)
+    required: false
+    default: ""
+  version:
+    description: Version string (defaults to git tag minus tag-prefix)
+    required: false
+    default: ""
+  tag:
+    description: Git tag (defaults to GITHUB_REF tag)
+    required: false
+    default: ""
+  tag-prefix:
+    description: Prefix stripped from git tag for version (e.g. v)
+    required: false
+    default: v
+  verify-tag:
+    description: Require a tag push when version/tag are not provided
+    required: false
+    default: "true"
+  name:
+    description: Cask display name
+    required: true
+  desc:
+    description: Cask description
+    required: true
+  homepage:
+    description: Cask homepage URL
+    required: true
+  app-name:
+    description: Application bundle name inside the DMG (e.g. CodexMenuBar.app)
+    required: true
+  asset-name:
+    description: Release asset filename ({tag}, {version} supported)
+    required: false
+    default: ""
+  download-url:
+    description: Direct download URL ({tag}, {version}, {owner}, {repo} supported)
+    required: false
+    default: ""
+  sha256:
+    description: SHA256 checksum (computed from download URL when empty)
+    required: false
+    default: ""
+  zap-trash:
+    description: Space-separated paths for zap trash (e.g. ~/.codex-menu-bar)
+    required: false
+    default: ""
+  commit-message:
+    description: Commit message ({cask}, {version}, {tag})
+    required: false
+    default: ""
+  create-pr:
+    description: Create a pull request instead of pushing directly
+    required: false
+    default: "false"
+  pr-base-branch:
+    description: Base branch for pull request
+    required: false
+    default: main
+  pr-branch-prefix:
+    description: Prefix for the pull request branch name
+    required: false
+    default: bump-
+
+outputs:
+  version:
+    description: Cask version
+    value: ${{ steps.publish.outputs.version }}
+  tag:
+    description: Git tag name
+    value: ${{ steps.publish.outputs.tag }}
+  download-url:
+    description: Resolved download URL
+    value: ${{ steps.publish.outputs.download-url }}
+  sha256:
+    description: SHA256 checksum
+    value: ${{ steps.publish.outputs.sha256 }}
+  cask-path:
+    description: Cask path inside the tap repository
+    value: ${{ steps.publish.outputs.cask-path }}
+  commit-sha:
+    description: Commit SHA in the tap repository
+    value: ${{ steps.publish.outputs.commit-sha }}
+  pull-request-url:
+    description: Pull request URL when create-pr is true
+    value: ${{ steps.publish.outputs.pull-request-url }}
+
+runs:
+  using: composite
+  steps:
+    - name: Publish Homebrew cask
+      id: publish
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token != '' && inputs.github-token || github.token }}
+        TAP_REPO: ${{ inputs.tap-repo }}
+        CASK_NAME: ${{ inputs.cask-name }}
+        CASK_PATH_INPUT: ${{ inputs.cask-path }}
+        TAP_BRANCH: ${{ inputs.tap-branch }}
+        RELEASE_REPO: ${{ inputs.release-repo != '' && inputs.release-repo || github.repository }}
+        VERSION_INPUT: ${{ inputs.version }}
+        TAG_INPUT: ${{ inputs.tag }}
+        TAG_PREFIX: ${{ inputs.tag-prefix }}
+        VERIFY_TAG: ${{ inputs.verify-tag }}
+        CASK_DISPLAY_NAME: ${{ inputs.name }}
+        CASK_DESC: ${{ inputs.desc }}
+        CASK_HOMEPAGE: ${{ inputs.homepage }}
+        APP_NAME: ${{ inputs.app-name }}
+        ASSET_NAME: ${{ inputs.asset-name }}
+        DOWNLOAD_URL_INPUT: ${{ inputs.download-url }}
+        SHA256_INPUT: ${{ inputs.sha256 }}
+        ZAP_TRASH: ${{ inputs.zap-trash }}
+        COMMIT_MESSAGE_INPUT: ${{ inputs.commit-message }}
+        CREATE_PR: ${{ inputs.create-pr }}
+        PR_BASE_BRANCH: ${{ inputs.pr-base-branch }}
+        PR_BRANCH_PREFIX: ${{ inputs.pr-branch-prefix }}
+        GITHUB_REPOSITORY_OWNER: ${{ github.repository_owner }}
+      run: |
+        set -euo pipefail
+
+        RAW_TAG="$TAG_INPUT"
+        if [[ -z "$RAW_TAG" && "$GITHUB_REF" == refs/tags/* ]]; then
+          RAW_TAG="${GITHUB_REF#refs/tags/}"
+        fi
+
+        if [[ -z "$RAW_TAG" && -z "$VERSION_INPUT" && "$VERIFY_TAG" == "true" ]]; then
+          echo "tag or version is required (got ref: $GITHUB_REF)" >&2
+          exit 1
+        fi
+
+        if [[ -z "$RAW_TAG" && -n "$VERSION_INPUT" ]]; then
+          RAW_TAG="${TAG_PREFIX}${VERSION_INPUT}"
+        fi
+
+        VERSION="${VERSION_INPUT:-$RAW_TAG}"
+        if [[ -n "$TAG_PREFIX" && "$VERSION" == "$TAG_PREFIX"* ]]; then
+          VERSION="${VERSION#"$TAG_PREFIX"}"
+        fi
+
+        if [[ -z "$VERSION" ]]; then
+          echo "version could not be resolved" >&2
+          exit 1
+        fi
+
+        expand_template() {
+          local value="$1"
+          value="${value//\{tag\}/$RAW_TAG}"
+          value="${value//\{version\}/$VERSION}"
+          value="${value//\{owner\}/$GITHUB_REPOSITORY_OWNER}"
+          value="${value//\{repo\}/${RELEASE_REPO#*/}}"
+          printf '%s' "$value"
+        }
+
+        DOWNLOAD_URL="$DOWNLOAD_URL_INPUT"
+        if [[ -n "$DOWNLOAD_URL" ]]; then
+          DOWNLOAD_URL="$(expand_template "$DOWNLOAD_URL")"
+        elif [[ -n "$ASSET_NAME" ]]; then
+          ASSET="$(expand_template "$ASSET_NAME")"
+          DOWNLOAD_URL=$(gh release view "$RAW_TAG" \
+            --repo "$RELEASE_REPO" \
+            --json assets \
+            --jq ".assets[] | select(.name == \"$ASSET\") | .browser_download_url")
+          if [[ -z "$DOWNLOAD_URL" ]]; then
+            DOWNLOAD_URL="https://github.com/${RELEASE_REPO}/releases/download/${RAW_TAG}/${ASSET}"
+          fi
+        else
+          echo "Either download-url or asset-name is required" >&2
+          exit 1
+        fi
+
+        SHA256="$SHA256_INPUT"
+        if [[ -z "$SHA256" ]]; then
+          echo "Computing sha256 from $DOWNLOAD_URL"
+          SHA256=$(curl -fsSL \
+            -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Accept: application/octet-stream" \
+            "$DOWNLOAD_URL" | shasum -a 256 | awk '{print $1}')
+        fi
+
+        CASK_PATH="${CASK_PATH_INPUT:-Casks/${CASK_NAME}.rb}"
+        WORKDIR=$(mktemp -d)
+        trap 'rm -rf "$WORKDIR"' EXIT
+
+        CASK_BODY="$WORKDIR/cask.rb"
+        {
+          echo "cask \"${CASK_NAME}\" do"
+          echo "  version \"${VERSION}\""
+          echo "  sha256 \"${SHA256}\""
+          echo
+          echo "  url \"${DOWNLOAD_URL}\""
+          echo "  name \"${CASK_DISPLAY_NAME}\""
+          echo "  desc \"${CASK_DESC}\""
+          echo "  homepage \"${CASK_HOMEPAGE}\""
+          echo
+          echo "  app \"${APP_NAME}\""
+          if [[ -n "$ZAP_TRASH" ]]; then
+            echo
+            echo "  zap trash: ["
+            # shellcheck disable=SC2206
+            PATHS=($ZAP_TRASH)
+            for path in "${PATHS[@]}"; do
+              echo "    \"${path}\","
+            done
+            echo "  ]"
+          fi
+          echo "end"
+        } > "$CASK_BODY"
+
+        git clone --depth=1 -b "$TAP_BRANCH" \
+          "https://x-access-token:${GH_TOKEN}@github.com/${TAP_REPO}.git" \
+          "$WORKDIR/tap"
+
+        mkdir -p "$(dirname "$WORKDIR/tap/$CASK_PATH")"
+        cp "$CASK_BODY" "$WORKDIR/tap/$CASK_PATH"
+
+        cd "$WORKDIR/tap"
+        git config user.name "github-actions[bot]"
+        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+        COMMIT_MESSAGE="$COMMIT_MESSAGE_INPUT"
+        if [[ -z "$COMMIT_MESSAGE" ]]; then
+          COMMIT_MESSAGE="Bump ${CASK_NAME} to ${VERSION}"
+        else
+          COMMIT_MESSAGE="${COMMIT_MESSAGE//\{cask\}/$CASK_NAME}"
+          COMMIT_MESSAGE="${COMMIT_MESSAGE//\{version\}/$VERSION}"
+          COMMIT_MESSAGE="${COMMIT_MESSAGE//\{tag\}/$RAW_TAG}"
+        fi
+
+        git add "$CASK_PATH"
+
+        if git diff --cached --quiet; then
+          echo "Cask already up to date"
+        else
+          PR_URL=""
+          COMMIT_SHA=""
+
+          if [[ "$CREATE_PR" == "true" ]]; then
+            PR_BRANCH="${PR_BRANCH_PREFIX}${CASK_NAME}-${VERSION}"
+            git checkout -b "$PR_BRANCH"
+            git commit -m "$COMMIT_MESSAGE"
+            git push origin "HEAD:refs/heads/$PR_BRANCH"
+            PR_URL=$(gh pr create \
+              --repo "$TAP_REPO" \
+              --base "$PR_BASE_BRANCH" \
+              --head "$PR_BRANCH" \
+              --title "$COMMIT_MESSAGE" \
+              --body "Automated cask publish from ${RELEASE_REPO}@${RAW_TAG}")
+          else
+            git commit -m "$COMMIT_MESSAGE"
+            git push origin "HEAD:refs/heads/$TAP_BRANCH"
+            COMMIT_SHA=$(git rev-parse HEAD)
+          fi
+
+          echo "commit-sha=$COMMIT_SHA" >> "$GITHUB_OUTPUT"
+          echo "pull-request-url=$PR_URL" >> "$GITHUB_OUTPUT"
+        fi
+
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+        echo "tag=$RAW_TAG" >> "$GITHUB_OUTPUT"
+        echo "download-url=$DOWNLOAD_URL" >> "$GITHUB_OUTPUT"
+        echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+        echo "cask-path=$CASK_PATH" >> "$GITHUB_OUTPUT"
