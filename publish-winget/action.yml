@@ -112,7 +112,7 @@ runs:
         } >> "$GITHUB_OUTPUT"
 
     - name: Publish WinGet package
-      uses: vedantmgoyal9/winget-releaser@${{ inputs.winget-releaser-version }}
+      uses: vedantmgoyal9/winget-releaser@main
       with:
         identifier: ${{ inputs.identifier }}
         version: ${{ steps.resolve.outputs.version }}
